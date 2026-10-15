@@ -1,0 +1,127 @@
+import io
+import os
+import fitz  # PyMuPDF
+from pypdf import PdfMerger, PdfReader
+import streamlit as st
+
+# --- PAGE CONFIGURATION FOR MOBILE ---
+st.set_page_config(
+    page_title="Takaful Surrender Auto-Filler", layout="centered"
+)
+
+st.title("📄 Takaful Form Auto-Filler")
+st.markdown(
+    "Select a client, auto-fill the **Discharge Voucher (PSF33B)**[cite: 1], merge supporting documents, and download."
+)
+
+# --- CLIENT DATABASE ---
+# In production, you can replace this dictionary with an SQLite database file
+CLIENT_DATABASE = {
+    "Ali bin Abu": {
+        "cert_no": "9148223199",
+        "nric": "850101-14-5555",
+        "name_covered": "Ali bin Abu",
+        "bank_name": "Maybank Malaysia",
+        "bank_acc": "112233445566",
+    },
+    "Siti binti Ahmad": {
+        "cert_no": "9148223200",
+        "nric": "900202-10-1234",
+        "name_covered": "Siti binti Ahmad",
+        "bank_name": "CIMB Bank",
+        "bank_acc": "778899001122",
+    },
+}
+
+# --- STEP 1: SELECT CLIENT ---
+st.header("1. Select Client")
+selected_name = st.selectbox(
+    "Choose Client Name or Search Certificate", list(CLIENT_DATABASE.keys())
+)
+client = CLIENT_DATABASE[selected_name]
+
+st.info(f"""
+**Selected Client Summary:**
+* **Certificate No.**: {client['cert_no']}[cite: 1]
+* **NRIC No.**: {client['nric']}[cite: 1]
+* **Covered Name**: {client['name_covered']}[cite: 1]
+* **Bank Details**: {client['bank_name']} - {client['bank_acc']}[cite: 2]
+""")
+
+# --- STEP 2: UPLOAD SUPPORTING DOCUMENTS ---
+st.header("2. Upload Supporting Documents")
+st.markdown(
+    "Attach client's IC or Passport copy as required by the form[cite: 3]."
+)
+uploaded_files = st.file_uploader(
+    "Upload Images or PDFs",
+    type=["pdf", "png", "jpg", "jpeg"],
+    accept_multiple_files=True,
+)
+
+# --- STEP 3: GENERATE & MERGE ---
+st.header("3. Generate Final PDF")
+
+if st.button("🚀 Generate & Merge PDF"):
+  with st.spinner("Processing form..."):
+    template_path = "full surender.pdf"
+
+    if not os.path.exists(template_path):
+      st.error(
+          "Error: 'full surender.pdf' template not found in the project folder!"
+      )
+    else:
+      # Open original PDF template using PyMuPDF
+      doc = fitz.open(template_path)
+      page = doc[0]  # Page 1 of the surrender form
+
+      # -------------------------------------------------------------
+      # COORDINATE MAPPING (Adjust X, Y coordinates to match your form fields)
+      # -------------------------------------------------------------
+      # Example coordinates (X, Y) for Page 1 fields:
+      page.insert_text(
+          (150, 142), client["cert_no"], fontsize=10, color=(0, 0, 0)
+      )  # Certificate No.[cite: 1]
+      page.insert_text(
+          (350, 142), client["nric"], fontsize=10, color=(0, 0, 0)
+      )  # NRIC No.[cite: 1]
+      page.insert_text(
+          (150, 175), client["name_covered"], fontsize=10, color=(0, 0, 0)
+      )  # Name of Person Covered[cite: 1]
+
+      # Bank details on Page 1 / Page 2 (adjust page index `doc[x]` if needed)
+      page_bank = doc[0]  # Assuming bank info is on page 1 or 2
+      page_bank.insert_text(
+          (200, 685), client["bank_name"], fontsize=10, color=(0, 0, 0)
+      )  # Bank Name[cite: 2]
+      page_bank.insert_text(
+          (200, 725), client["bank_acc"], fontsize=10, color=(0, 0, 0)
+      )  # Bank Account No.[cite: 2]
+
+      # Save filled form to memory bytes
+      filled_pdf_bytes = doc.tobytes()
+      doc.close()
+
+      # Initialize PyPDF Merger to combine filled form + uploaded files
+      merger = PdfMerger()
+      merger.append(io.BytesIO(filled_pdf_bytes))
+
+      # Append uploaded supporting documents (IC copies, etc.)[cite: 3]
+      for file in uploaded_files:
+        merger.append(file)
+
+      output_filename = f"Surrender_Form_{client['cert_no']}.pdf"
+      output_path = f"/tmp/{output_filename}"
+      merger.write(output_path)
+      merger.close()
+
+      st.success("Form successfully filled and merged!")
+
+      # Provide mobile-optimized download button
+      with open(output_path, "rb") as f:
+        st.download_button(
+            label="📥 Download Final Combined PDF",
+            data=f,
+            file_name=output_filename,
+            mime="application/pdf",
+        )
